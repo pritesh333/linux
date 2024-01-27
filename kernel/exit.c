@@ -69,8 +69,10 @@
 #include <linux/rethook.h>
 #include <linux/sysfs.h>
 #include <linux/user_events.h>
-
 #include <linux/uaccess.h>
+
+#include <uapi/linux/wait.h>
+
 #include <asm/unistd.h>
 #include <asm/mmu_context.h>
 
@@ -135,7 +137,6 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
 		list_del_init(&p->sibling);
 		__this_cpu_dec(process_counts);
 	}
-	list_del_rcu(&p->thread_group);
 	list_del_rcu(&p->thread_node);
 }
 
@@ -541,7 +542,6 @@ static void exit_mm(void)
 	exit_mm_release(current, mm);
 	if (!mm)
 		return;
-	sync_mm_rss(mm);
 	mmap_read_lock(mm);
 	mmgrab_lazy_tlb(mm);
 	BUG_ON(mm != current->active_mm);
@@ -826,14 +826,9 @@ void __noreturn do_exit(long code)
 	ptrace_event(PTRACE_EVENT_EXIT, code);
 	user_events_exit(tsk);
 
-	validate_creds_for_do_exit(tsk);
-
 	io_uring_files_cancel();
 	exit_signals(tsk);  /* sets PF_EXITING */
 
-	/* sync mm's RSS info before statistics gathering */
-	if (tsk->mm)
-		sync_mm_rss(tsk->mm);
 	acct_update_integrals(tsk);
 	group_dead = atomic_dec_and_test(&tsk->signal->live);
 	if (group_dead) {
@@ -914,7 +909,6 @@ void __noreturn do_exit(long code)
 	if (tsk->task_frag.page)
 		put_page(tsk->task_frag.page);
 
-	validate_creds_for_do_exit(tsk);
 	exit_task_stack_account(tsk);
 
 	check_stack_usage();
